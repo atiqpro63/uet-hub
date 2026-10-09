@@ -2,12 +2,12 @@
 Project Title: UET Hub - Complete Academic & Class Management Suite
 Course: Fundamental Programming (Python)
 Instructor: Miss Kalsoom Safdar
-Features: 
+Features:
   - Role-Based Authentication (Student, CR, GR)
-  - Interactive Timetable (Add & Delete Slots)
+  - Interactive Timetable (Add & Remove Slots)
   - Quizzes, Assignments & Deadlines Tracker
   - Personal Student Checklist (Persistent)
-  - Daily Attendance Tracker & Metrics
+  - Master Attendance Suite (Mark, View Roster, CSV Export)
   - Academic Resource & Past Papers Repository
   - Administrative Control Room for CR & GR
 Database: SQLite3 Relational Engine
@@ -17,6 +17,7 @@ GUI: Python Streamlit
 import sqlite3
 import hashlib
 import datetime
+import pandas as pd
 import streamlit as st
 
 # --- Page Setup ---
@@ -316,9 +317,9 @@ with tab_tasks:
     else:
         st.info("No personal tasks added. Create one above to stay organized!")
 
-# ----------------- 4. ATTENDANCE -----------------
+# ----------------- 4. ATTENDANCE (STUDENT VIEW) -----------------
 with tab_att:
-    st.subheader("📊 Attendance Portal")
+    st.subheader("📊 My Personal Attendance Records")
     
     att_records = execute_query(
         "SELECT date, subject, status FROM attendance WHERE student_id = ? ORDER BY date DESC",
@@ -337,7 +338,7 @@ with tab_att:
     col_m4.metric("Absents", absents)
     st.divider()
 
-    st.write("#### My Attendance History")
+    st.write("#### My Attendance Log")
     if att_records:
         for date_val, subj, stat in att_records:
             icon = "✅" if stat == "Present" else ("❌" if stat == "Absent" else "🟡")
@@ -395,7 +396,7 @@ with tab_cr_panel:
         st.subheader("⚙️ CR & GR Administration Suite")
         st.success(f"Administrative session active for {current_user['role']} ({current_user['name']}).")
         
-        adm_1, adm_2, adm_3 = st.tabs(["Manage Timetable", "Mark Student Attendance", "Post Quizzes & Assignments"])
+        adm_1, adm_2, adm_3 = st.tabs(["Manage Timetable", "Attendance Suite (Mark & View)", "Post Quizzes & Assignments"])
 
         # SUB-TAB 1: TIMETABLE MANAGEMENT (ADD & DELETE)
         with adm_1:
@@ -437,20 +438,22 @@ with tab_cr_panel:
             else:
                 st.info("No timetable slots available to remove.")
 
-        # SUB-TAB 2: MARK STUDENT ATTENDANCE
+        # SUB-TAB 2: ATTENDANCE SUITE (MARK + VIEW ROSTER)
         with adm_2:
-            st.markdown("#### 📝 Mark Student Attendance")
+            st.markdown("#### 📝 Mark Daily Student Attendance")
             students = execute_query("SELECT id, reg_no, full_name FROM users WHERE role = 'Student' ORDER BY reg_no ASC")
             
             if students:
                 with st.form("mark_att_form"):
-                    att_sub = st.selectbox("Subject", [
+                    col_f1, col_f2 = st.columns(2)
+                    att_sub = col_f1.selectbox("Subject", [
                         "Programming Fundamentals",
                         "Calculus & Analytical Geometry",
                         "Data Science Fundamentals",
-                        "Applied Physics"
+                        "Applied Physics",
+                        "Discrete Mathematics"
                     ])
-                    att_date = st.date_input("Lecture Date", datetime.date.today()).strftime("%Y-%m-%d")
+                    att_date = col_f2.date_input("Lecture Date", datetime.date.today()).strftime("%Y-%m-%d")
                     st.write("---")
                     
                     student_statuses = {}
@@ -472,10 +475,42 @@ with tab_cr_panel:
                                 (sid, att_date, att_sub, stat),
                                 commit=True
                             )
-                        st.success("Attendance records saved to database!")
+                        st.success("Attendance successfully committed to database!")
                         st.rerun()
             else:
-                st.warning("No registered students found in the database. When students register their accounts, they will appear here.")
+                st.warning("No registered students found in the database. When students create accounts, they will appear here.")
+
+            st.divider()
+            st.markdown("#### 📋 Complete Class Attendance Sheet")
+            
+            # Fetch master record with student details joined
+            master_att = execute_query("""
+                SELECT 
+                    a.date AS "Date",
+                    a.subject AS "Subject",
+                    u.reg_no AS "Reg No",
+                    u.full_name AS "Student Name",
+                    a.status AS "Status"
+                FROM attendance a
+                JOIN users u ON a.student_id = u.id
+                ORDER BY a.date DESC, u.reg_no ASC
+            """)
+
+            if master_att:
+                df_att = pd.DataFrame(master_att, columns=["Date", "Subject", "Reg No", "Student Name", "Status"])
+                st.dataframe(df_att, use_container_width=True)
+                
+                # CSV Export Button for CR records
+                csv_data = df_att.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Full Attendance Sheet (CSV)",
+                    data=csv_data,
+                    file_name=f"UET_Attendance_{datetime.date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.info("No attendance records have been registered in the database yet.")
 
         # SUB-TAB 3: POST OFFICIAL TASKS
         with adm_3:
