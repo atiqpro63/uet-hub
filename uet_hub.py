@@ -1,20 +1,11 @@
 """
 Project Title: UET Hub - Complete Academic & Class Management Suite
 Course: Fundamental Programming (Python)
-Instructor: Miss Kalsoom Safdar
-Features:
-  - Role-Based Authentication (Student, CR, GR)
-  - Interactive Timetable (Add & Remove Slots)
-  - Quizzes, Assignments & Deadlines Tracker
-  - Personal Student Checklist (Persistent)
-  - Master Attendance Suite (Mark, View Roster, CSV Export)
-  - Academic Resource & Past Papers Repository
-  - Administrative Control Room for CR & GR
-Database: SQLite3 Relational Engine
+Database: Supabase Cloud PostgreSQL
 GUI: Python Streamlit
 """
 
-import sqlite3
+import psycopg2
 import hashlib
 import datetime
 import pandas as pd
@@ -27,106 +18,40 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-DB_NAME = "uet_hub_system.db"
-
-# --- Database Initialization & Migration ---
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
+# --- Database Connection & Query Engine ---
+def get_db_connection():
+    pg = st.secrets["postgres"]
+    return psycopg2.connect(
+        host=pg["host"],
+        port=pg["port"],
+        dbname=pg["dbname"],
+        user=pg["user"],
+        password=pg["password"]
+    )
+def execute_query(query: str, params=(), commit=False):
+    """Executes query on cloud PostgreSQL, adapting SQLite-style ? to %s placeholders."""
+    pg_query = query.replace("?", "%s")
+    conn = get_db_connection()
     cur = conn.cursor()
-    
-    # 1. Users Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            reg_no TEXT UNIQUE NOT NULL,
-            full_name TEXT NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT CHECK(role IN ('Student', 'CR', 'GR')) NOT NULL
-        )
-    """)
-    
-    # 2. Timetable Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS timetable (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            day TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            time_slot TEXT NOT NULL,
-            room TEXT NOT NULL,
-            teacher TEXT NOT NULL
-        )
-    """)
-    
-    # 3. Quizzes & Assignments Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS academic_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT CHECK(category IN ('Assignment', 'Quiz', 'Pending Work')) NOT NULL,
-            subject TEXT NOT NULL,
-            title TEXT NOT NULL,
-            due_date TEXT NOT NULL,
-            details TEXT NOT NULL
-        )
-    """)
-    
-    # 4. Personal Student Checklist Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS personal_tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            task_title TEXT NOT NULL,
-            status TEXT CHECK(status IN ('Pending', 'Completed')) DEFAULT 'Pending',
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-    
-    # 5. Attendance Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS attendance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id INTEGER NOT NULL,
-            date TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            status TEXT CHECK(status IN ('Present', 'Absent', 'Leave')) NOT NULL,
-            FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-    
-    # 6. Past Papers & Study Resources Table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS study_resources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            subject TEXT NOT NULL,
-            title TEXT NOT NULL,
-            doc_type TEXT NOT NULL,
-            resource_url TEXT NOT NULL,
-            uploaded_by TEXT NOT NULL
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
-
-init_db()
+    try:
+        cur.execute(pg_query, params)
+        if commit:
+            conn.commit()
+            data = None
+        else:
+            data = cur.fetchall()
+        return data
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
 
 # --- Helper Functions ---
 def hash_pass(password: str) -> str:
     """Returns SHA256 hashed password."""
     return hashlib.sha256(password.encode()).hexdigest()
-
-def execute_query(query: str, params=(), commit=False):
-    """Safely executes SQLite query."""
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute(query, params)
-    if commit:
-        conn.commit()
-        data = None
-    else:
-        data = cur.fetchall()
-    conn.close()
-    return data
 
 # --- Session Management ---
 if "user" not in st.session_state:
@@ -198,7 +123,7 @@ if not st.session_state.user:
                             commit=True
                         )
                         st.success("Account created successfully! Please proceed to the Login tab.")
-                    except sqlite3.IntegrityError:
+                    except psycopg2.IntegrityError:
                         st.error("A user with this registration number already exists.")
 
     st.stop()
@@ -210,7 +135,7 @@ current_user = st.session_state.user
 is_admin = current_user["role"] in ["CR", "GR"]
 
 # Sidebar Profile & Operations
-st.sidebar.markdown(f"### 👤 User Profile")
+st.sidebar.markdown("### 👤 User Profile")
 st.sidebar.write(f"**Name:** {current_user['name']}")
 st.sidebar.write(f"**Reg No:** `{current_user['reg_no']}`")
 st.sidebar.markdown(f"**Role:** :blue-background[{current_user['role']}]")
@@ -218,11 +143,12 @@ st.sidebar.divider()
 st.sidebar.button("🚪 Log Out", on_click=logout, use_container_width=True)
 
 # Main Navigation Tabs
-tab_tt, tab_academics, tab_tasks, tab_att, tab_repo, tab_cr_panel = st.tabs([
+tab_tt, tab_academics, tab_tasks, tab_att, tab_gpa, tab_repo, tab_cr_panel = st.tabs([
     "📅 Timetable",
     "📝 Quizzes & Assignments",
     "✅ Personal Checklist",
     "📊 Attendance",
+    "🧮 GPA Calculator",
     "📚 Past Papers & Notes",
     "⚙️ CR/GR Control Room" if is_admin else "ℹ️ Class Info"
 ])
@@ -270,7 +196,7 @@ with tab_academics:
 # ----------------- 3. PERSONAL STUDENT CHECKLIST -----------------
 with tab_tasks:
     st.subheader("✅ My Personal Task Checklist")
-    st.caption("Private to your account. Track your own homework, lab preparation, and personal study goals.")
+    st.caption("Private to your account. Track your homework, lab tasks, and personal study goals.")
     
     with st.form("add_personal_task", clear_on_submit=True):
         col_t1, col_t2 = st.columns([5, 1])
@@ -317,7 +243,7 @@ with tab_tasks:
     else:
         st.info("No personal tasks added. Create one above to stay organized!")
 
-# ----------------- 4. ATTENDANCE (STUDENT VIEW) -----------------
+# ----------------- 4. ATTENDANCE & 75% WARNING ENGINE -----------------
 with tab_att:
     st.subheader("📊 My Personal Attendance Records")
     
@@ -338,6 +264,24 @@ with tab_att:
     col_m4.metric("Absents", absents)
     st.divider()
 
+    if total_classes > 0:
+        if percentage < 75.0:
+            needed_classes = int(-(-(0.75 * total_classes - presents) // 0.25))
+            if needed_classes <= 0:
+                needed_classes = 1
+            st.error(
+                f"🚨 **Attendance Shortage Alert! ({percentage:.1f}%)**\n\n"
+                f"Your attendance is below the mandatory university 75% limit. "
+                f"You must attend the next **{needed_classes} consecutive lecture(s)** without an absence to restore your standing to 75%."
+            )
+        elif 75.0 <= percentage < 80.0:
+            st.warning(
+                f"⚠️ **Borderline Attendance Warning ({percentage:.1f}%)**\n\n"
+                "You are just above the 75% threshold. Any upcoming unexcused absence could put you at risk."
+            )
+        else:
+            st.success(f"✅ **Safe Zone ({percentage:.1f}%)**: Your attendance meets university requirements.")
+    
     st.write("#### My Attendance Log")
     if att_records:
         for date_val, subj, stat in att_records:
@@ -346,7 +290,55 @@ with tab_att:
     else:
         st.info("No attendance records uploaded for your registration number yet.")
 
-# ----------------- 5. PAST PAPERS & REPOSITORY -----------------
+# ----------------- 5. GPA & CGPA CALCULATOR -----------------
+with tab_gpa:
+    st.subheader("🧮 Semester GPA & Projected CGPA Calculator")
+    st.caption("Standard UET 4.0 grading scale: A (4.0), A- (3.7), B+ (3.3), B (3.0), B- (2.7), C+ (2.3), C (2.0), D (1.0), F (0.0)")
+
+    grade_points = {
+        "A (4.0)": 4.0,
+        "A- (3.7)": 3.7,
+        "B+ (3.3)": 3.3,
+        "B (3.0)": 3.0,
+        "B- (2.7)": 2.7,
+        "C+ (2.3)": 2.3,
+        "C (2.0)": 2.0,
+        "D (1.0)": 1.0,
+        "F (0.0)": 0.0
+    }
+
+    num_courses = st.number_input("Number of Courses This Semester:", min_value=1, max_value=10, value=5, step=1)
+    
+    course_entries = []
+    st.write("---")
+    
+    for i in range(num_courses):
+        c_col1, c_col2, c_col3 = st.columns([3, 2, 2])
+        c_name = c_col1.text_input(f"Course {i+1} Name", value=f"Course {i+1}", key=f"c_name_{i}")
+        c_credit = c_col2.selectbox(f"Credit Hours", [4, 3, 2, 1], index=1, key=f"c_cred_{i}")
+        c_grade = c_col3.selectbox(f"Expected / Final Grade", list(grade_points.keys()), key=f"c_grd_{i}")
+        course_entries.append((c_credit, grade_points[c_grade]))
+
+    total_credits = sum(entry[0] for entry in course_entries)
+    total_quality_points = sum(entry[0] * entry[1] for entry in course_entries)
+    calculated_gpa = (total_quality_points / total_credits) if total_credits > 0 else 0.0
+
+    st.divider()
+    res_col1, res_col2 = st.columns(2)
+    res_col1.metric("Current Semester GPA", f"{calculated_gpa:.2f}")
+    res_col2.metric("Total Semester Credit Hours", total_credits)
+
+    with st.expander("📈 Calculate Cumulative CGPA (Previous Semesters + Current)"):
+        cg_col1, cg_col2 = st.columns(2)
+        prev_cgpa = cg_col1.number_input("Previous Cumulative CGPA", min_value=0.0, max_value=4.0, value=0.0, step=0.01)
+        prev_credits = cg_col2.number_input("Total Credit Hours Completed Previously", min_value=0, max_value=150, value=0, step=1)
+
+        if prev_credits > 0:
+            combined_credits = prev_credits + total_credits
+            cumulative_cgpa = ((prev_cgpa * prev_credits) + total_quality_points) / combined_credits
+            st.success(f"🎯 **Projected Overall CGPA:** **{cumulative_cgpa:.2f}** over {combined_credits} total credit hours.")
+
+# ----------------- 6. PAST PAPERS & REPOSITORY -----------------
 with tab_repo:
     st.subheader("📚 Subject Resources & Past Papers")
     
@@ -387,7 +379,7 @@ with tab_repo:
     else:
         st.info("No documents uploaded yet.")
 
-# ----------------- 6. CR / GR ADMINISTRATIVE CONTROL ROOM -----------------
+# ----------------- 7. CR / GR ADMINISTRATIVE CONTROL ROOM -----------------
 with tab_cr_panel:
     if not is_admin:
         st.subheader("Class Overview")
@@ -398,7 +390,7 @@ with tab_cr_panel:
         
         adm_1, adm_2, adm_3 = st.tabs(["Manage Timetable", "Attendance Suite (Mark & View)", "Post Quizzes & Assignments"])
 
-        # SUB-TAB 1: TIMETABLE MANAGEMENT (ADD & DELETE)
+        # SUB-TAB 1: TIMETABLE MANAGEMENT
         with adm_1:
             st.markdown("#### ➕ Add New Timetable Period")
             with st.form("add_tt_form", clear_on_submit=True):
@@ -438,7 +430,7 @@ with tab_cr_panel:
             else:
                 st.info("No timetable slots available to remove.")
 
-        # SUB-TAB 2: ATTENDANCE SUITE (MARK + VIEW ROSTER)
+        # SUB-TAB 2: ATTENDANCE SUITE
         with adm_2:
             st.markdown("#### 📝 Mark Daily Student Attendance")
             students = execute_query("SELECT id, reg_no, full_name FROM users WHERE role = 'Student' ORDER BY reg_no ASC")
@@ -483,7 +475,6 @@ with tab_cr_panel:
             st.divider()
             st.markdown("#### 📋 Complete Class Attendance Sheet")
             
-            # Fetch master record with student details joined
             master_att = execute_query("""
                 SELECT 
                     a.date AS "Date",
@@ -500,7 +491,6 @@ with tab_cr_panel:
                 df_att = pd.DataFrame(master_att, columns=["Date", "Subject", "Reg No", "Student Name", "Status"])
                 st.dataframe(df_att, use_container_width=True)
                 
-                # CSV Export Button for CR records
                 csv_data = df_att.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download Full Attendance Sheet (CSV)",
