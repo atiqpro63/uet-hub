@@ -243,7 +243,7 @@ elif active_tab == "📍 Mark Attendance":
     else:
         s_id, s_course, s_pin, s_expires = active_sess[0]
 
-        # Check expiration against UTC time
+        # Check expiration against timezone-aware comparison
         if datetime.now(s_expires.tzinfo) > s_expires:
             st.warning(f"The attendance session for **{s_course}** has expired.")
             execute_query("UPDATE attendance_sessions SET is_active = FALSE WHERE id = ?", (s_id,), commit=True)
@@ -391,11 +391,12 @@ elif active_tab == "🧮 GPA Calculator":
 elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
     st.title("🛠️ Representative Control Room")
 
-    cr_panel_tab1, cr_panel_tab2, cr_panel_tab3, cr_panel_tab4 = st.tabs([
+    cr_panel_tab1, cr_panel_tab2, cr_panel_tab3, cr_panel_tab4, cr_panel_tab5 = st.tabs([
         "📡 Attendance Session",
         "📥 Export CSV Roster",
         "📢 Post Academic Notice",
-        "📚 Upload Resource"
+        "📚 Upload Resource",
+        "📅 Manage Timetable"
     ])
 
     # Sub-Tab 1: Passcode Session Generator
@@ -500,3 +501,25 @@ elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
                         commit=True
                     )
                     st.success("Study resource added to the class library!")
+
+    # Sub-Tab 5: Add Lecture Slot to Timetable Directly from App
+    with cr_panel_tab5:
+        st.subheader("Add Lecture Slot to Timetable")
+        with st.form("add_timetable_slot_form"):
+            tt_day = st.selectbox("Day of Week", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+            tt_course = st.selectbox("Course / Subject", SEMESTER_SUBJECTS)
+            tt_timing = st.text_input("Timing (e.g. 08:30 AM - 10:00 AM)")
+            tt_room = st.text_input("Room / Hall (e.g. CS Lab 2 or Room 101)")
+            tt_instructor = st.text_input("Instructor / Teacher Name")
+            submit_slot = st.form_submit_button("Add to Class Timetable")
+
+            if submit_slot:
+                if not tt_timing or not tt_room or not tt_instructor:
+                    st.error("Please fill in timing, room, and instructor.")
+                else:
+                    execute_query(
+                        "INSERT INTO timetable (day, course, timing, room, instructor) VALUES (?, ?, ?, ?, ?)",
+                        (tt_day, tt_course, tt_timing, tt_room, tt_instructor),
+                        commit=True
+                    )
+                    st.success(f"Added {tt_course} on {tt_day} ({tt_timing}) to the timetable!")
