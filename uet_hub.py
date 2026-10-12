@@ -4,6 +4,7 @@ from psycopg2 import pool
 import pandas as pd
 import hashlib
 import random
+import re
 from datetime import datetime, timedelta
 
 # ==============================================================================
@@ -122,7 +123,7 @@ if not st.session_state["authenticated"]:
     with auth_tab1:
         st.subheader("Sign In to Your Account")
         with st.form("login_form"):
-            login_reg = st.text_input("Registration Number (e.g. 2026-DS-01)").strip().upper()
+            login_reg = st.text_input("Registration Number (e.g. 2026-DS-001)").strip().upper()
             login_pwd = st.text_input("Password", type="password").strip()
             submit_login = st.form_submit_button("Sign In")
 
@@ -149,7 +150,7 @@ if not st.session_state["authenticated"]:
     with auth_tab2:
         st.subheader("Register New Account")
         with st.form("signup_form"):
-            new_reg = st.text_input("Registration Number (e.g. 2026-DS-01)").strip().upper()
+            new_reg = st.text_input("Registration Number (Format: 2026-DS-001)").strip().upper()
             new_name = st.text_input("Full Name").strip()
             new_role = st.selectbox("Role", ["Student", "CR", "GR"])
             new_pwd = st.text_input("Password", type="password").strip()
@@ -157,8 +158,13 @@ if not st.session_state["authenticated"]:
             submit_signup = st.form_submit_button("Complete Registration")
 
             if submit_signup:
+                # Enforce strictly 3 digits: 2026-DS-001 to 2026-DS-999
+                reg_pattern = r"^2026-DS-\d{3}$"
+
                 if not new_reg or not new_name or not new_pwd:
                     st.error("All fields are mandatory.")
+                elif not re.match(reg_pattern, new_reg):
+                    st.error("Invalid Roll Number format! Must strictly have 3 digits (e.g. 2026-DS-001, 2026-DS-045).")
                 elif new_pwd != new_pwd_confirm:
                     st.error("Passwords do not match.")
                 else:
@@ -502,7 +508,7 @@ elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
                     )
                     st.success("Study resource added to the class library!")
 
-    # Sub-Tab 5: Add Lecture Slot to Timetable Directly from App
+    # Sub-Tab 5: Add Lecture Slot to Timetable
     with cr_panel_tab5:
         st.subheader("Add Lecture Slot to Timetable")
         with st.form("add_timetable_slot_form"):
