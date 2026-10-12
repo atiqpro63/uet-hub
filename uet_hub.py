@@ -32,16 +32,17 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Full Semester Subject Offerings
+# Official Semester Subject Offerings
 SEMESTER_SUBJECTS = [
     "Programming Fundamentals",
-    "Programming Fundamentals Lab",
-    "Discrete Mathematics",
-    "AICT",
-    "AICT Lab",
+    "Programming Fundamentals (LAB)",
+    "Discrete Mathematical Structures",
+    "Applications of Information & Communication Technologies",
+    "Applications of Information & Communication Technologies (LAB)",
     "Applied Physics",
-    "Applied Physics Lab",
-    "Calculus & Analytical Geometry"
+    "Applied Physics (LAB)",
+    "Calculus I",
+    "Basic Mathematics"
 ]
 
 # ==============================================================================
@@ -73,7 +74,6 @@ def execute_query(query, params=(), commit=False):
     conn = pg_pool.getconn()
     result = None
     try:
-        # Convert legacy sqlite ? syntax to postgres %s syntax safely
         pg_query = query.replace("?", "%s")
         with conn.cursor() as cur:
             cur.execute(pg_query, params)
@@ -158,13 +158,13 @@ if not st.session_state["authenticated"]:
             submit_signup = st.form_submit_button("Complete Registration")
 
             if submit_signup:
-                # Enforce strictly 3 digits: 2026-DS-001 to 2026-DS-999
+                # Strictly requires 3 digits after 2026-DS-
                 reg_pattern = r"^2026-DS-\d{3}$"
 
                 if not new_reg or not new_name or not new_pwd:
                     st.error("All fields are mandatory.")
                 elif not re.match(reg_pattern, new_reg):
-                    st.error("Invalid Roll Number format! Must strictly have 3 digits (e.g. 2026-DS-001, 2026-DS-045).")
+                    st.error("Invalid Roll Number format! Must strictly have 3 digits: e.g., 2026-DS-001, 2026-DS-045.")
                 elif new_pwd != new_pwd_confirm:
                     st.error("Passwords do not match.")
                 else:
@@ -199,7 +199,7 @@ if is_cr_gr:
 active_tab = st.sidebar.radio("Navigation", nav_tabs)
 
 # ==============================================================================
-# TAB 1: TIMETABLE
+# TAB 1: TIMETABLE (CHRONOLOGICAL DISPLAY)
 # ==============================================================================
 if active_tab == "📅 Timetable":
     st.title("📅 Class Timetable")
@@ -207,15 +207,18 @@ if active_tab == "📅 Timetable":
     selected_day = st.selectbox("Select Day", days)
 
     schedule = execute_query(
-        "SELECT course, timing, room, instructor FROM timetable WHERE day = ? ORDER BY timing ASC",
+        "SELECT course, timing, room, instructor FROM timetable WHERE day = ? ORDER BY slot_order ASC",
         (selected_day,)
     )
 
     if schedule:
         df_time = pd.DataFrame(schedule, columns=["Course", "Timing", "Room", "Instructor"])
-        st.dataframe(df_time, use_container_width=True)
+        st.dataframe(df_time, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No scheduled classes found for {selected_day}.")
+        if selected_day == "Thursday":
+            st.info("Thursday is an official reserved day / off.")
+        else:
+            st.info(f"No scheduled classes found for {selected_day}.")
 
 # ==============================================================================
 # TAB 2: EVENTS & QUIZZES
@@ -229,7 +232,7 @@ elif active_tab == "📌 Events & Quizzes":
 
     if events:
         df_ev = pd.DataFrame(events, columns=["Category", "Course", "Deadline", "Details"])
-        st.dataframe(df_ev, use_container_width=True)
+        st.dataframe(df_ev, use_container_width=True, hide_index=True)
     else:
         st.info("No upcoming deadlines or pending academic tasks posted.")
 
@@ -249,7 +252,6 @@ elif active_tab == "📍 Mark Attendance":
     else:
         s_id, s_course, s_pin, s_expires = active_sess[0]
 
-        # Check expiration against timezone-aware comparison
         if datetime.now(s_expires.tzinfo) > s_expires:
             st.warning(f"The attendance session for **{s_course}** has expired.")
             execute_query("UPDATE attendance_sessions SET is_active = FALSE WHERE id = ?", (s_id,), commit=True)
@@ -263,7 +265,6 @@ elif active_tab == "📍 Mark Attendance":
                 if entered_pin.strip() != s_pin:
                     st.error("Incorrect PIN. Please verify the code announced in class.")
                 else:
-                    # Check duplicate
                     already_marked = execute_query(
                         "SELECT id FROM attendance WHERE student_id = ? AND course = ? AND date = ?",
                         (st.session_state["user_id"], s_course, today_str)
@@ -303,7 +304,6 @@ elif active_tab == "📊 Attendance Summary":
                 presents = len(c_data[c_data["Status"] == "Present"])
                 pct = round((presents / total_c) * 100, 1)
 
-                # Consecutive classes needed if below 75%
                 needed = 0
                 if pct < 75.0:
                     needed = int(-(-(0.75 * total_c - presents) // 0.25))
@@ -319,9 +319,8 @@ elif active_tab == "📊 Attendance Summary":
 
         if summary_list:
             df_summary = pd.DataFrame(summary_list)
-            st.dataframe(df_summary, use_container_width=True)
+            st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
-            # Highlighting warnings
             shortages = df_summary[df_summary["Status"] == "⚠️ Shortage Alert"]
             if not shortages.empty:
                 for _, row in shortages.iterrows():
@@ -415,13 +414,11 @@ elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
             generated_pin = str(random.randint(1000, 9999))
             expires_at = datetime.utcnow() + timedelta(minutes=duration)
 
-            # Close existing open sessions
             execute_query(
                 "UPDATE attendance_sessions SET is_active = FALSE WHERE is_active = TRUE",
                 commit=True
             )
 
-            # Create fresh active session
             execute_query(
                 "INSERT INTO attendance_sessions (course, passcode, expires_at, is_active) VALUES (?, ?, ?, TRUE)",
                 (sess_subj, generated_pin, expires_at),
@@ -487,35 +484,61 @@ elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
                 )
                 st.success("Academic deadline published successfully!")
 
-    # Sub-Tab 4: Upload Drive Links
+    # Sub-Tab 4: Upload Resources (Direct PDF or Link)
     with cr_panel_tab4:
-        st.subheader("Share Slides & Past Papers")
+        st.subheader("Upload Lab Manuals, Slides & Handouts")
         with st.form("add_res_form"):
             res_subj = st.selectbox("Subject", SEMESTER_SUBJECTS, key="res_subj_post")
-            res_title = st.text_input("Document Title (e.g. Midterm 2024 Solution)")
-            res_type = st.selectbox("Document Type", ["Lecture Slide", "Past Paper", "Book/Manual", "Handwritten Notes"])
-            res_url = st.text_input("Resource URL (Google Drive / OneDrive Link)")
+            res_title = st.text_input("Document Title (e.g. Lab Manual 01 - Basics)")
+            res_type = st.selectbox("Document Type", ["Lab Manual", "Lecture Slide", "Past Paper", "Book/Notes"])
+            
+            uploaded_pdf = st.file_uploader("Upload PDF File (Optional)", type=["pdf"])
+            res_url = st.text_input("Or Paste Drive / Direct Link", help="Used if no file is uploaded above")
+            
             post_res = st.form_submit_button("Upload Resource")
 
             if post_res:
-                if not res_title or not res_url:
-                    st.error("Title and URL are required.")
+                final_url = res_url.strip() if res_url else ""
+                
+                # If a file was uploaded directly, attempt to upload to Supabase Storage
+                if uploaded_pdf is not None:
+                    try:
+                        from supabase import create_client
+                        sb_url = st.secrets.get("supabase", {}).get("url") or f"https://{st.secrets['postgres']['host'].split('.')[0]}.supabase.co"
+                        sb_key = st.secrets.get("supabase", {}).get("key") or st.secrets["postgres"]["password"]
+                        
+                        sb_client = create_client(sb_url, sb_key)
+                        clean_filename = f"{res_subj[:4]}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uploaded_pdf.name}"
+                        sb_client.storage.from_("uet_materials").upload(
+                            path=clean_filename,
+                            file=uploaded_pdf.read(),
+                            file_options={"content-type": "application/pdf"}
+                        )
+                        final_url = sb_client.storage.from_("uet_materials").get_public_url(clean_filename)
+                    except Exception as upload_err:
+                        # If bucket/credentials aren't setup yet, warn user
+                        if not final_url:
+                            st.error(f"Storage upload failed: {upload_err}. Please paste a Drive link instead.")
+
+                if not res_title or not final_url:
+                    st.error("Please provide a Title and either upload a PDF or paste a link.")
                 else:
                     execute_query(
                         "INSERT INTO study_resources (subject, title, doc_type, resource_url, uploaded_by) VALUES (?, ?, ?, ?, ?)",
-                        (res_subj, res_title, res_type, res_url, st.session_state["full_name"]),
+                        (res_subj, res_title, res_type, final_url, st.session_state["full_name"]),
                         commit=True
                     )
-                    st.success("Study resource added to the class library!")
+                    st.success(f"Resource '{res_title}' posted successfully!")
 
     # Sub-Tab 5: Add Lecture Slot to Timetable
     with cr_panel_tab5:
         st.subheader("Add Lecture Slot to Timetable")
         with st.form("add_timetable_slot_form"):
             tt_day = st.selectbox("Day of Week", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+            tt_order = st.number_input("Slot Order (1 = earliest lecture, 2 = second, etc.)", min_value=1, max_value=10, value=1)
             tt_course = st.selectbox("Course / Subject", SEMESTER_SUBJECTS)
-            tt_timing = st.text_input("Timing (e.g. 08:30 AM - 10:00 AM)")
-            tt_room = st.text_input("Room / Hall (e.g. CS Lab 2 or Room 101)")
+            tt_timing = st.text_input("Timing (e.g. 08:00 AM - 10:00 AM)")
+            tt_room = st.text_input("Room / Hall (e.g. CSC-102)")
             tt_instructor = st.text_input("Instructor / Teacher Name")
             submit_slot = st.form_submit_button("Add to Class Timetable")
 
@@ -524,8 +547,8 @@ elif active_tab == "🛠️ CR/GR Control Room" and is_cr_gr:
                     st.error("Please fill in timing, room, and instructor.")
                 else:
                     execute_query(
-                        "INSERT INTO timetable (day, course, timing, room, instructor) VALUES (?, ?, ?, ?, ?)",
-                        (tt_day, tt_course, tt_timing, tt_room, tt_instructor),
+                        "INSERT INTO timetable (day, slot_order, course, timing, room, instructor) VALUES (?, ?, ?, ?, ?, ?)",
+                        (tt_day, tt_order, tt_course, tt_timing, tt_room, tt_instructor),
                         commit=True
                     )
                     st.success(f"Added {tt_course} on {tt_day} ({tt_timing}) to the timetable!")
