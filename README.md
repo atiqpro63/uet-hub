@@ -23,7 +23,11 @@ attendance and personal-task foreign keys. The Streamlit app currently uses a
 private PostgreSQL connection; do not put that connection credential or a
 Supabase secret/service-role key in browser-visible code.
 
-This is a development baseline, not approval for official department records.
-Before rollout, replace the deny-all API policies with reviewed policies that
-match the final identity, student roster, and staff role model. Also replace
-self-selected CR/GR registration and SHA-256 password storage in the app.
+New public registrations are students; CR/GR access must be assigned by a
+trusted administrator. Passwords use salted PBKDF2-SHA256, and existing SHA-256
+passwords are upgraded after a successful sign-in.
+
+This is still a development baseline, not approval for official department
+records. Before rollout, add the department-approved identity, roster-scoped
+authorization, account recovery, and staff account-management workflows. The
+public API policies intentionally deny access until those rules are reviewed.
