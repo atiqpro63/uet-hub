@@ -14,7 +14,11 @@ export async function sendSignInLink(_previous: SignInState, formData: FormData)
     const supabase = await createClient();
     const configuredSite = process.env.NEXT_PUBLIC_SITE_URL;
     const vercelHost = process.env.VERCEL_URL;
-    const siteUrl = configuredSite || (vercelHost ? `https://${vercelHost}` : "http://localhost:3000");
+    const siteUrl = process.env.VERCEL_ENV === "production" && configuredSite
+      ? configuredSite
+      : vercelHost
+        ? `https://${vercelHost}`
+        : configuredSite || "http://localhost:3000";
     await supabase.auth.signInWithOtp({
       email,
       options: {
