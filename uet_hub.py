@@ -3,8 +3,11 @@ import psycopg2
 from psycopg2 import pool
 import pandas as pd
 import hashlib
+import hmac
 import random
 import re
+import secrets
+import base64
 from datetime import datetime, timedelta
 
 # ==============================================================================
@@ -90,8 +93,36 @@ def execute_query(query, params=(), commit=False):
     return result
 
 def hash_pass(password: str) -> str:
-    """Returns SHA-256 hash of a string."""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """Hash a password with PBKDF2-SHA256 and a unique random salt."""
+    rounds = 600_000
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
+    salt_text = base64.urlsafe_b64encode(salt).decode("ascii").rstrip("=")
+    digest_text = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"$pbkdf2_sha256${rounds}${salt_text}${digest_text}"
+
+
+def verify_pass(password: str, stored_hash: str) -> tuple[bool, bool]:
+    """Return (valid, needs_upgrade), including legacy SHA-256 hashes."""
+    if stored_hash.startswith("$pbkdf2_sha256$"):
+        try:
+            _, algorithm, rounds_text, salt_text, digest_text = stored_hash.split("$")
+            if algorithm != "pbkdf2_sha256":
+                return False, False
+            rounds = int(rounds_text)
+            if rounds < 100_000 or rounds > 2_000_000:
+                return False, False
+            salt = base64.urlsafe_b64decode(salt_text + "=" * (-len(salt_text) % 4))
+            expected = base64.urlsafe_b64decode(digest_text + "=" * (-len(digest_text) % 4))
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
+            return hmac.compare_digest(actual, expected), False
+        except (ValueError, TypeError):
+            return False, False
+
+    # Upgrade legacy SHA-256 hashes after the next successful sign-in.
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    valid = hmac.compare_digest(legacy_hash, stored_hash)
+    return valid, valid
 
 # ==============================================================================
 # 3. SESSION STATE & AUTHENTICATION
@@ -124,19 +155,31 @@ if not st.session_state["authenticated"]:
         st.subheader("Sign In to Your Account")
         with st.form("login_form"):
             login_reg = st.text_input("Registration Number (e.g. 2026-DS-001)").strip().upper()
-            login_pwd = st.text_input("Password", type="password").strip()
+            login_pwd = st.text_input("Password", type="password")
             submit_login = st.form_submit_button("Sign In")
 
             if submit_login:
                 if not login_reg or not login_pwd:
                     st.error("Please fill in both Registration Number and Password.")
                 else:
-                    hashed_login = hash_pass(login_pwd)
                     user_record = execute_query(
                         "SELECT id, reg_no, full_name, role, password FROM users WHERE reg_no = ?",
                         (login_reg,)
                     )
-                    if user_record and user_record[0][4] == hashed_login:
+                    password_valid = False
+                    password_needs_upgrade = False
+                    if user_record:
+                        password_valid, password_needs_upgrade = verify_pass(
+                            login_pwd, user_record[0][4]
+                        )
+
+                    if user_record and password_valid:
+                        if password_needs_upgrade:
+                            execute_query(
+                                "UPDATE users SET password = ? WHERE id = ?",
+                                (hash_pass(login_pwd), user_record[0][0]),
+                                commit=True
+                            )
                         st.session_state["authenticated"] = True
                         st.session_state["user_id"] = user_record[0][0]
                         st.session_state["reg_no"] = user_record[0][1]
@@ -152,9 +195,9 @@ if not st.session_state["authenticated"]:
         with st.form("signup_form"):
             new_reg = st.text_input("Registration Number (Format: 2026-DS-001)").strip().upper()
             new_name = st.text_input("Full Name").strip()
-            new_role = st.selectbox("Role", ["Student", "CR", "GR"])
-            new_pwd = st.text_input("Password", type="password").strip()
-            new_pwd_confirm = st.text_input("Confirm Password", type="password").strip()
+            st.caption("Representative accounts are assigned by the department administrator.")
+            new_pwd = st.text_input("Password", type="password")
+            new_pwd_confirm = st.text_input("Confirm Password", type="password")
             submit_signup = st.form_submit_button("Complete Registration")
 
             if submit_signup:
@@ -170,8 +213,8 @@ if not st.session_state["authenticated"]:
                 else:
                     try:
                         execute_query(
-                            "INSERT INTO users (reg_no, full_name, password, role) VALUES (?, ?, ?, ?)",
-                            (new_reg, new_name, hash_pass(new_pwd), new_role),
+                            "INSERT INTO users (reg_no, full_name, password, role) VALUES (?, ?, ?, 'Student')",
+                            (new_reg, new_name, hash_pass(new_pwd)),
                             commit=True
                         )
                         st.success("Account created successfully! Please switch to the Login tab.")
