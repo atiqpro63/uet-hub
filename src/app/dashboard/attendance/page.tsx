@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { createClassSession, saveSessionAttendance } from "./actions";
+import { createClassSession, saveSessionAttendance, submitAttendancePin } from "./actions";
 
 type Relation<T> = T | T[] | null;
 function one<T>(value: Relation<T>): T | null {
@@ -12,6 +12,7 @@ function messageFor(error: string | undefined) {
   if (error === "role") return "Only assigned course staff can record attendance.";
   if (error === "empty") return "No attendance rows were submitted.";
   if (error === "incomplete") return "Choose a status for every student on the approved roster before saving.";
+  if (error === "pin") return "That attendance code was not accepted. Check the four digits, session time, and your class enrollment. Five incorrect tries will lock that session until it expires.";
   return null;
 }
 
@@ -31,13 +32,18 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
 
   const flash = messageFor(typeof params.error === "string" ? params.error : undefined);
   const isStaff = ["faculty", "cr", "gr", "admin"].includes(profile.role);
+  const { data: enrollments } = await supabase.from("course_enrollments")
+    .select("course_offering_id").eq("student_id", userId);
+  const enrolledOfferingIds = (enrollments ?? []).map((entry) => entry.course_offering_id);
+  const liveSessionsResult = enrolledOfferingIds.length ? await supabase.from("class_sessions")
+    .select("id, session_date, starts_at, ends_at, offering:course_offerings!inner(section_name, course:department_courses!inner(course_code, title))")
+    .in("course_offering_id", enrolledOfferingIds)
+    .gt("ends_at", new Date().toISOString()).order("ends_at") : { data: [] };
 
   if (!isStaff) {
-    const { data: records } = await supabase
-      .from("class_attendance")
-      .select("id, status, marked_at, session:class_sessions!inner(session_date, offering:course_offerings!inner(section_name, course:department_courses!inner(course_code, title)))")
-      .eq("student_id", userId)
-      .order("marked_at", { ascending: false });
+    const { data: records } = await supabase.from("class_attendance")
+        .select("id, status, marked_at, session:class_sessions!inner(session_date, offering:course_offerings!inner(section_name, course:department_courses!inner(course_code, title)))")
+        .eq("student_id", userId).order("marked_at", { ascending: false });
 
     return (
       <section className="dashboard-page">
@@ -45,6 +51,13 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
           <div><span className="eyebrow"><span className="eyebrow-dot" /> ATTENDANCE LEDGER</span><h1>Your attendance.</h1></div>
           <p>Records entered by your assigned course staff</p>
         </div>
+        {params.pin_saved === "1" && <p className="notice success-notice" role="status">Your attendance is recorded for this class.</p>}
+        {flash && <p className="notice error-notice" role="alert">{flash}</p>}
+        {liveSessionsResult.data?.length ? <section className="live-session-area"><h2>Open attendance sessions</h2><div className="live-session-grid">{liveSessionsResult.data.map((session) => {
+          const offering = one(session.offering);
+          const course = one(offering?.course);
+          return <article className="live-session-card" key={session.id}><span className="eyebrow">{course?.course_code} · SECTION {offering?.section_name}</span><h3>{course?.title}</h3><p>Started {new Date(session.starts_at).toLocaleTimeString("en-PK", { timeZone: "Asia/Karachi", hour: "2-digit", minute: "2-digit" })} · Closes {session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-PK", { timeZone: "Asia/Karachi", hour: "2-digit", minute: "2-digit" }) : "soon"}</p><form action={submitAttendancePin} className="pin-submit-form"><input type="hidden" name="session_id" value={session.id} /><label htmlFor={`pin-${session.id}`}>Four-digit class code</label><input id={`pin-${session.id}`} name="passcode" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{4}" maxLength={4} placeholder="0000" required /><button className="button button-primary" type="submit">Mark me present <span aria-hidden="true">→</span></button></form></article>;
+        })}</div></section> : <p className="empty-inline live-session-empty">No live attendance session is open for your course sections right now.</p>}
         {records?.length ? (
           <div className="table-wrap"><table className="data-table">
             <thead><tr><th>Course</th><th>Section</th><th>Class date</th><th>Status</th></tr></thead>
@@ -71,7 +84,7 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
         .select("student_id, student:department_profiles!course_enrollments_student_id_fkey(registration_no, full_name)")
         .eq("course_offering_id", offering.id),
       supabase.from("class_sessions")
-        .select("id, session_date, starts_at")
+        .select("id, session_date, starts_at, ends_at")
         .eq("course_offering_id", offering.id)
         .order("session_date", { ascending: false }),
     ]);
@@ -79,7 +92,10 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
       const { data: marks } = await supabase.from("class_attendance")
         .select("student_id, status")
         .eq("session_id", session.id);
-      return { ...session, marks: marks ?? [] };
+      const { data: pin } = session.ends_at && new Date(session.ends_at).getTime() > Date.now()
+        ? await supabase.rpc("get_live_attendance_pin", { target_session: session.id })
+        : { data: null };
+      return { ...session, marks: marks ?? [], livePin: Array.isArray(pin) ? pin[0] : null };
     }));
     return { ...offering, roster: rosterResult.data ?? [], sessions };
   }));
@@ -88,11 +104,17 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
     <section className="dashboard-page">
       <div className="dashboard-header">
         <div><span className="eyebrow"><span className="eyebrow-dot" /> COURSE STAFF</span><h1>Take attendance.</h1></div>
-        <p>Open a class session, then record each enrolled student.</p>
+        <p>Open a short class code session or record the roll manually.</p>
       </div>
-      {params.created === "1" && <p className="notice success-notice" role="status">Class session opened. Record the roll below.</p>}
+      {typeof params.created === "string" && <p className="notice success-notice" role="status">Live session opened. Share the displayed code with students in class.</p>}
       {params.saved === "1" && <p className="notice success-notice" role="status">Attendance saved for this session.</p>}
+      {params.pin_saved === "1" && <p className="notice success-notice" role="status">Attendance recorded from the live class code.</p>}
       {flash && <p className="notice error-notice" role="alert">{flash}</p>}
+      {liveSessionsResult.data?.length ? <section className="live-session-area"><h2>Open attendance sessions for your class</h2><div className="live-session-grid">{liveSessionsResult.data.map((session) => {
+        const offering = one(session.offering);
+        const course = one(offering?.course);
+        return <article className="live-session-card" key={session.id}><span className="eyebrow">{course?.course_code} · SECTION {offering?.section_name}</span><h3>{course?.title}</h3><p>Closes {session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-PK", { timeZone: "Asia/Karachi", hour: "2-digit", minute: "2-digit" }) : "soon"}</p><form action={submitAttendancePin} className="pin-submit-form"><input type="hidden" name="session_id" value={session.id} /><label htmlFor={`pin-${session.id}`}>Four-digit class code</label><input id={`pin-${session.id}`} name="passcode" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{4}" maxLength={4} placeholder="0000" required /><button className="button button-primary" type="submit">Mark me present <span aria-hidden="true">→</span></button></form></article>;
+      })}</div></section> : null}
 
       {courseSections.length ? courseSections.map((offering) => {
         const course = one(offering.course);
@@ -102,7 +124,8 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
               <div><span className="eyebrow">{course?.course_code} · SECTION {offering.section_name}</span><h2>{course?.title}</h2><p>{offering.roster.length} approved students on the roster</p></div>
               <form action={createClassSession}>
                 <input type="hidden" name="course_offering_id" value={offering.id} />
-                <button className="button button-primary" type="submit">Open today’s session <span aria-hidden="true">+</span></button>
+                <label className="session-duration-label">PIN valid<select name="duration_minutes" defaultValue="5"><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label>
+                <button className="button button-primary" type="submit">Open PIN session <span aria-hidden="true">+</span></button>
               </form>
             </div>
 
@@ -111,6 +134,7 @@ export default async function AttendancePage({ searchParams }: PageProps<"/dashb
               return (
                 <form action={saveSessionAttendance} className="session-form" key={session.id}>
                   <div className="session-heading"><div><span className="eyebrow">CLASS SESSION</span><h3>{session.session_date}</h3></div><span className="session-count">{session.marks.length} marked</span></div>
+                  {session.livePin && <div className="live-pin-display"><span>SHARE THIS CLASS CODE</span><strong>{session.livePin.passcode}</strong><small>Valid until {new Date(session.livePin.expires_at).toLocaleTimeString("en-PK", { timeZone: "Asia/Karachi", hour: "2-digit", minute: "2-digit" })}</small></div>}
                   <input type="hidden" name="session_id" value={session.id} />
                   {offering.roster.length ? (
                     <div className="roster-list">

@@ -5,13 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 // This authenticated shell reads the user's cookies and profile at request time.
 export const instant = false;
 
-const navigation = [
-  ["Overview", "/dashboard"],
-  ["Attendance", "/dashboard/attendance"],
-  ["Timetable", "/dashboard/timetable"],
-  ["Updates", "/dashboard/updates"],
-];
-
 export default async function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getClaims();
@@ -23,6 +16,14 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
     .select("full_name, role, account_status")
     .eq("id", userId)
     .maybeSingle();
+  const navigation = [
+    ["Overview", "/dashboard"],
+    ["Attendance", "/dashboard/attendance"],
+    ["Timetable", "/dashboard/timetable"],
+    ["Updates", "/dashboard/updates"],
+    ["Classwork", "/dashboard/learning"],
+    ...(profile?.role === "admin" ? [["Class setup", "/dashboard/admin"]] : []),
+  ];
 
   return (
     <main className="site-shell">
