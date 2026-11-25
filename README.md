@@ -25,11 +25,19 @@ the exact production `/auth/callback` URL, and the Vercel preview pattern
 
 ## Account access
 
-The sign-in page sends a one-time email link and does not create accounts.
-Department staff must invite university email accounts through Supabase Auth.
-The database creates each invited account as a pending student profile. A
-trusted administrator must approve it and assign its roster number and role.
+Students can request an account with their university student email and
+registration number. The email must follow the UET student format derived from
+the registration number (for example, `2026-DS-308` maps to
+`2026ds308@student.uet.edu.pk`). Supabase sends a one-time verification link;
+new accounts remain pending until a trusted administrator matches them against
+the imported class roster, chooses a role, and assigns a course section.
 Students cannot promote themselves or enroll themselves in courses.
+
+The `class_self_registration` migration copies only registration numbers,
+student names, and derived university emails from the legacy `users` table into
+an administrator-only roster. It does not copy legacy password hashes or past
+attendance into the new portal. The old records remain available in their
+legacy tables while the class pilot is checked.
 
 ## Database
 
@@ -49,10 +57,14 @@ SET role = 'admin', account_status = 'active'
 WHERE id = '<the invited Auth user UUID>';
 ```
 
-After the admin profile is activated, use Supabase Table Editor to provision the
-academic term, courses, sections, staff assignments, timetable, and approved
-student roster before opening the portal to a class. Attendance staff must
-choose a status for every student before a session can be saved.
+After the admin profile is activated, open **Class setup** in the portal to
+create a term/course section and approve verified classmates into that section.
+Use Supabase Table Editor to add the section timetable. Assigned course staff
+can open short attendance PIN sessions or record the roll manually. The web
+portal also supports assignment posts with written/link submissions and
+time-windowed multiple-choice quizzes. Uploaded assignment files, grading and
+feedback workflows, and historical attendance import are not part of this
+class-pilot baseline yet.
 
 ## Legacy files
 

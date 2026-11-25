@@ -43,6 +43,11 @@ export default async function DashboardPage() {
           <h2>Updates & resources</h2>
           <p>Find course announcements and shared learning materials.</p>
         </Link>
+      <Link className="dashboard-tile" href="/dashboard/learning">
+        <span>04 / CLASSWORK</span>
+        <h2>Assignments & quizzes</h2>
+        <p>Post course work, submit responses, and take class quizzes.</p>
+      </Link>
       </div>
       <p className="dashboard-note">{courseCount > 0 ? `${courseCount} course section${courseCount === 1 ? "" : "s"} available to your account.` : "Your course sections will appear here after the department administrator loads the approved roster."}</p>
     </section>

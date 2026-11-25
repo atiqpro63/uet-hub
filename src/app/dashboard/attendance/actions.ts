@@ -20,20 +20,37 @@ async function requireActiveUser() {
 }
 
 export async function createClassSession(formData: FormData) {
-  const { supabase, userId, role } = await requireActiveUser();
+  const { supabase, role } = await requireActiveUser();
   if (!["faculty", "cr", "gr", "admin"].includes(role)) redirect("/dashboard/attendance?error=role");
 
   const offeringId = String(formData.get("course_offering_id") ?? "");
+  const duration = Number(formData.get("duration_minutes") ?? "5");
   if (!/^[0-9a-f-]{36}$/i.test(offeringId)) redirect("/dashboard/attendance?error=course");
+  if (!Number.isInteger(duration) || duration < 1 || duration > 15) redirect("/dashboard/attendance?error=session");
 
-  const { error } = await supabase.from("class_sessions").insert({
-    course_offering_id: offeringId,
-    created_by: userId,
+  const { data, error } = await supabase.rpc("open_live_attendance", {
+    target_offering: offeringId,
+    duration_minutes: duration,
   });
-  if (error) redirect("/dashboard/attendance?error=session");
+  const session = Array.isArray(data) ? data[0] : null;
+  if (error || !session?.session_id) redirect("/dashboard/attendance?error=session");
 
   revalidatePath("/dashboard/attendance");
-  redirect("/dashboard/attendance?created=1");
+  redirect(`/dashboard/attendance?created=${session.session_id}`);
+}
+
+export async function submitAttendancePin(formData: FormData) {
+  const { supabase } = await requireActiveUser();
+  const sessionId = String(formData.get("session_id") ?? "");
+  const passcode = String(formData.get("passcode") ?? "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId) || !/^\d{4}$/.test(passcode)) redirect("/dashboard/attendance?error=pin");
+  const { data, error } = await supabase.rpc("submit_attendance_pin", {
+    target_session: sessionId,
+    entered_pin: passcode,
+  });
+  if (error || data !== true) redirect("/dashboard/attendance?error=pin");
+  revalidatePath("/dashboard/attendance");
+  redirect("/dashboard/attendance?pin_saved=1");
 }
 
 export async function saveSessionAttendance(formData: FormData) {

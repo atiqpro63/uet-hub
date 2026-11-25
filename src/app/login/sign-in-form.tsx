@@ -17,7 +17,7 @@ export function SignInForm() {
         <span aria-hidden="true">→</span>
       </button>
       {state.message && <p className="auth-message" role="status">{state.message}</p>}
-      <p className="auth-help">Access is limited to accounts invited and approved by the department.</p>
+      <p className="auth-help">Already registered? Sign in here. New students can request access below; class membership still requires roster approval.</p>
     </form>
   );
 }
