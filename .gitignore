@@ -1,3 +1,16 @@
 .streamlit/
 *.db
 __pycache__/
+
+# Next.js
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets and local configuration
+.env*
+!.env.example
+node_modules
