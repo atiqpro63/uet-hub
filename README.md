@@ -14,9 +14,14 @@ a reference during the migration.
 3. Run `npm install`, then `npm run dev`.
 4. Open `http://localhost:3000`.
 
-The same three public environment variables must be set in the Vercel project's
-Production, Preview, and Development environments. Add each deployed URL to the
-Supabase Auth redirect allow list.
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for
+Vercel's Production, Preview, and Development environments. Set
+`NEXT_PUBLIC_SITE_URL` to the canonical site URL in Production and
+`http://localhost:3000` in Development; Preview deployments use Vercel's own
+deployment URL for email sign-in links. In Supabase Auth URL Configuration, set
+the Site URL to the canonical production URL and allow `http://localhost:3000/**`,
+the exact production `/auth/callback` URL, and the Vercel preview pattern
+`https://*-uet-hub.vercel.app/**`.
 
 ## Account access
 
