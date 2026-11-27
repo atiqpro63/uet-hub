@@ -1,76 +1,81 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export type SignInState = { message: string; sent: boolean };
 export type RegistrationState = { message: string; sent: boolean };
 
-function authRedirectUrl() {
-  const configuredSite = process.env.NEXT_PUBLIC_SITE_URL;
-  const vercelHost = process.env.VERCEL_URL;
-  const siteUrl = process.env.VERCEL_ENV === "production" && configuredSite
-    ? configuredSite
-    : vercelHost
-      ? `https://${vercelHost}`
-      : configuredSite || "http://localhost:3000";
-  return new URL("/auth/callback?next=/dashboard", siteUrl).toString();
+function normalizedRegistration(value: FormDataEntryValue | null) {
+  return String(value ?? "").trim().toUpperCase();
 }
 
-export async function sendSignInLink(_previous: SignInState, formData: FormData): Promise<SignInState> {
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { message: "Enter a valid email address.", sent: false };
+function isValidRegistration(value: string) {
+  return /^20\d{2}-[A-Z]{2,3}-\d{3}$/.test(value);
+}
+
+// Supabase Auth uses an internal email-shaped identifier; students sign in
+// with their registration number and never need access to this mailbox.
+function authEmailForRegistration(registrationNo: string) {
+  return `${registrationNo.replaceAll("-", "").toLowerCase()}@student.uet.edu.pk`;
+}
+
+export async function signInWithRegistration(_previous: SignInState, formData: FormData): Promise<SignInState> {
+  const registrationNo = normalizedRegistration(formData.get("registration_no"));
+  const password = String(formData.get("password") ?? "");
+
+  if (!isValidRegistration(registrationNo) || !password) {
+    return { message: "Enter your registration number and UET Hub password.", sent: false };
   }
 
   try {
     const supabase = await createClient();
-    await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: authRedirectUrl(),
-      },
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmailForRegistration(registrationNo),
+      password,
     });
+    if (error) return { message: "Sign-in failed. Check your details or ask the class administrator for help.", sent: false };
   } catch {
-    // Keep the response generic so the page does not disclose whether an account exists.
+    return { message: "Sign-in is unavailable right now. Please try again later.", sent: false };
   }
 
-  return {
-    message: "If your department account is approved, a secure sign-in link will arrive shortly.",
-    sent: true,
-  };
+  redirect("/dashboard");
 }
 
 export async function requestStudentAccess(_previous: RegistrationState, formData: FormData): Promise<RegistrationState> {
   const fullName = String(formData.get("full_name") ?? "").trim().replace(/\s+/g, " ");
-  const registrationNo = String(formData.get("registration_no") ?? "").trim().toUpperCase();
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const validRegistration = /^\d{4}-[A-Z]{2,3}-\d{3}$/.test(registrationNo);
-  const expectedEmail = `${registrationNo.replaceAll("-", "").toLowerCase()}@student.uet.edu.pk`;
+  const registrationNo = normalizedRegistration(formData.get("registration_no"));
+  const password = String(formData.get("password") ?? "");
+  const passwordConfirmation = String(formData.get("password_confirmation") ?? "");
 
-  if (fullName.length < 3 || fullName.length > 120 || !validRegistration || email !== expectedEmail) {
-    return {
-      message: "Check your name, registration number, and university email. The email must match your registration number (for example, 2026-DS-308 uses 2026ds308@student.uet.edu.pk).",
-      sent: false,
-    };
+  if (fullName.length < 3 || fullName.length > 120 || !isValidRegistration(registrationNo)) {
+    return { message: "Enter your full name and a valid registration number, such as 2026-DS-308.", sent: false };
+  }
+  if (password.length < 12 || password.length > 72) {
+    return { message: "Choose a UET Hub password between 12 and 72 characters. Do not use your LMS password.", sent: false };
+  }
+  if (password !== passwordConfirmation) {
+    return { message: "The passwords do not match.", sent: false };
   }
 
   try {
     const supabase = await createClient();
-    await supabase.auth.signInWithOtp({
-      email,
+    const { data, error } = await supabase.auth.signUp({
+      email: authEmailForRegistration(registrationNo),
+      password,
       options: {
-        shouldCreateUser: true,
-        emailRedirectTo: authRedirectUrl(),
         data: { full_name: fullName, registration_no: registrationNo },
       },
     });
+    if (error) {
+      return { message: "We couldn't create this account. If you already registered, sign in or contact the class administrator.", sent: false };
+    }
+    if (!data.session) {
+      return { message: "This project still requires email confirmation. The administrator must turn that setting off before students can register without a mailbox.", sent: false };
+    }
   } catch {
-    // Keep this generic: don't disclose whether an email already has an account.
+    return { message: "Registration is unavailable right now. Please try again later.", sent: false };
   }
 
-  return {
-    message: "If this university account can be registered, a secure link will arrive by email. Your account will still need class roster approval before you can use the portal.",
-    sent: true,
-  };
+  redirect("/dashboard");
 }

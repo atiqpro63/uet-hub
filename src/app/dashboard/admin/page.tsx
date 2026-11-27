@@ -12,7 +12,7 @@ function errorMessage(error: string | undefined) {
   if (error === "term") return "The academic term could not be saved.";
   if (error === "offering") return "The course section could not be created.";
   if (error === "approval") return "The account could not be approved. Refresh and try again.";
-  if (error === "roster") return "This request does not match the saved class roster and university email.";
+  if (error === "roster") return "This account does not match the saved class roster.";
   if (error === "enrollment") return "The student could not be added to this class section.";
   if (error === "representative") return "That representative role is already assigned, or could not be saved.";
   return null;
@@ -65,7 +65,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/dashboard/
       </article>
 
       <article className="course-panel">
-        <div className="course-panel-head"><div><span className="eyebrow">STEP 2</span><h2>Approve class requests</h2><p>Only verified student email and registration-number matches can be approved.</p></div></div>
+        <div className="course-panel-head"><div><span className="eyebrow">STEP 2</span><h2>Approve class requests</h2><p>Check each student in person against the saved roster before approving. Email is not used to verify identity in this pilot.</p></div></div>
         {!pendingResult.data?.length ? <p className="empty-inline">No pending requests yet. Students can request access from the sign-in page.</p> : (
           <div className="admin-requests">
             {pendingResult.data.map((student) => {
@@ -74,7 +74,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/dashboard/
                 <input type="hidden" name="student_id" value={student.id} />
                 <div className="admin-request-identity">
                   <strong>{student.full_name}</strong>
-                  <span>{student.email ?? "No verified email shown"}</span>
+                  <span>Registration-based account · identity check required</span>
                   <span>{student.registration_no ?? "Does not match the saved roster"}{matchRole ? ` · Previous class role: ${matchRole}` : ""}</span>
                 </div>
                 <label>Class section<select name="course_offering_id" required defaultValue="">
@@ -92,7 +92,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/dashboard/
           </div>
         )}
         {!offeringsResult.data?.length && <p className="notice error-notice" role="note">Create at least one course section above before approving students.</p>}
-        <p className="admin-footnote">The old class roster is used only to confirm registration number, name, and the university email pattern. Old passwords and attendance history are not copied into new accounts.</p>
+        <p className="admin-footnote">Verify the student face-to-face before approval. UET Hub passwords are separate from LMS passwords. Old passwords and attendance history are not copied into new accounts.</p>
       </article>
     </section>
   );
