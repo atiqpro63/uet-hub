@@ -16,17 +16,17 @@ export default function LoginPage() {
         <div className="auth-copy">
           <span className="eyebrow"><span className="eyebrow-dot" /> DEPARTMENT ACCESS</span>
           <h1>Welcome back<br />to your <em>department.</em></h1>
-          <p>Students can request class access with their university account. A representative or administrator must match the details against the saved class roster before portal access is approved.</p>
+          <p>Students use their registration number and a password made only for UET Hub. A class administrator must verify each student against the saved class roster before access is approved.</p>
         </div>
         <div className="auth-stack">
           <div className="auth-card">
             <h2>Sign in to UET Hub</h2>
-            <p>We’ll send a one-time secure link to your email. No password to remember.</p>
+            <p>Sign in with your registration number and UET Hub password.</p>
             <SignInForm />
           </div>
           <div className="auth-card registration-card">
             <h2>First time here?</h2>
-            <p>Request access with your university email and registration number. A class administrator must confirm your details before class information is available.</p>
+            <p>Create an account with your registration number and a new UET Hub password. A class administrator must verify your identity before class information is available.</p>
             <RegistrationForm />
           </div>
         </div>
